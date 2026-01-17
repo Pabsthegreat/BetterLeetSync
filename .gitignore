@@ -1,0 +1,30 @@
+# Node.js
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Environment variables
+.env
+*.env
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Extension build
+extension.zip
+
+# Temporary files
+*.tmp
+temp/

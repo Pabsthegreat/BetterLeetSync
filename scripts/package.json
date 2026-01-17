@@ -1,0 +1,13 @@
+{
+  "name": "leetcode-whatsapp-notifier",
+  "version": "1.0.0",
+  "description": "Daily LeetCode problem sender via WhatsApp",
+  "main": "daily-leetcode.js",
+  "scripts": {
+    "start": "node daily-leetcode.js",
+    "test": "node daily-leetcode.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.0"
+  }
+}
