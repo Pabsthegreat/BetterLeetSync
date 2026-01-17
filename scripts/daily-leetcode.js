@@ -112,13 +112,6 @@ function parseSolutionFile(filePath) {
 
 // Format HTML email content
 function formatEmailHTML(problem, description, code) {
-  const emoji = {
-    'Easy': '🟢',
-    'Medium': '🟡',
-    'Hard': '🔴'
-  };
-  
-  const difficultyEmoji = emoji[problem.difficulty] || '';
   const difficultyColor = {
     'Easy': '#00b8a3',
     'Medium': '#ffc01e',
@@ -126,8 +119,11 @@ function formatEmailHTML(problem, description, code) {
   };
   const color = difficultyColor[problem.difficulty] || '#666';
   
-  const topics = problem.topics && problem.topics.length > 0 
-    ? `<p style="color: #666; font-size: 14px;">🏷️ ${problem.topics.join(', ')}</p>` 
+  // Generate topic pills
+  const topicPills = problem.topics && problem.topics.length > 0 
+    ? problem.topics.map(topic => 
+        `<span style="display: inline-block; background-color: #f0f0f0; color: #333; padding: 6px 12px; border-radius: 16px; font-size: 12px; font-weight: 500; margin: 4px 4px 4px 0;">${topic}</span>`
+      ).join('')
     : '';
   
   // Escape HTML in description and code
@@ -153,33 +149,33 @@ function formatEmailHTML(problem, description, code) {
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 20px;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden;">
           <!-- Header -->
           <tr>
-            <td style="background-color: #1a1a1a; padding: 20px; text-align: center;">
-              <h1 style="margin: 0; color: white; font-size: 24px;">📚 Daily LeetCode Challenge</h1>
-              <p style="margin: 10px 0 0 0; color: #999; font-size: 14px;">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <td style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); padding: 30px 30px 25px 30px;">
+              <h1 style="margin: 0 0 8px 0; color: #FFA116; font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">LeetCode Daily</h1>
+              <p style="margin: 0; color: #a0a0a0; font-size: 13px; font-weight: 500;">${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </td>
           </tr>
           
-          <!-- Problem Title -->
+          <!-- Problem Title & Metadata -->
           <tr>
-            <td style="padding: 30px 30px 20px 30px;">
-              <h2 style="margin: 0; font-size: 22px; color: #1a1a1a;">
-                ${difficultyEmoji} ${problem.name}
+            <td style="padding: 30px 30px 20px 30px; background-color: #fafafa;">
+              <h2 style="margin: 0 0 16px 0; font-size: 24px; color: #1a1a1a; font-weight: 700; line-height: 1.3;">
+                ${problem.name}
               </h2>
-              <p style="margin: 10px 0 0 0; font-size: 14px;">
-                <span style="background-color: ${color}; color: white; padding: 4px 12px; border-radius: 12px; font-weight: 500;">${problem.difficulty}</span>
-              </p>
-              ${topics}
+              <div style="margin-bottom: 12px;">
+                <span style="display: inline-block; background-color: ${color}; color: white; padding: 6px 16px; border-radius: 20px; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">${problem.difficulty}</span>
+              </div>
+              ${topicPills ? `<div style="margin-top: 16px;">${topicPills}</div>` : ''}
             </td>
           </tr>
           
           <!-- Problem Description -->
           <tr>
-            <td style="padding: 0 30px 30px 30px;">
-              <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">📝 Problem Description</h3>
-              <div style="color: #333; line-height: 1.6; font-size: 14px;">
+            <td style="padding: 30px; background-color: white;">
+              <h3 style="margin: 0 0 18px 0; font-size: 16px; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Problem Description</h3>
+              <div style="color: #4a4a4a; line-height: 1.7; font-size: 14px;">
                 ${descHtml}
               </div>
             </td>
@@ -187,19 +183,19 @@ function formatEmailHTML(problem, description, code) {
           
           <!-- Solution Code -->
           <tr>
-            <td style="padding: 0 30px 30px 30px;">
-              <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px;">💻 Solution</h3>
-              <div style="background-color: #f8f8f8; border-radius: 6px; padding: 15px; overflow-x: auto;">
-                <pre style="margin: 0; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5; color: #333; white-space: pre-wrap; word-wrap: break-word;"><code>${codeHtml}</code></pre>
+            <td style="padding: 0 30px 30px 30px; background-color: white;">
+              <h3 style="margin: 0 0 18px 0; font-size: 16px; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Solution</h3>
+              <div style="background-color: #1e1e1e; border-radius: 8px; padding: 20px; overflow-x: auto; border: 1px solid #e0e0e0;">
+                <pre style="margin: 0; font-family: 'Monaco', 'Menlo', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #d4d4d4; white-space: pre-wrap; word-wrap: break-word;"><code>${codeHtml}</code></pre>
               </div>
             </td>
           </tr>
           
           <!-- Footer -->
           <tr>
-            <td style="background-color: #f8f8f8; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
-              <p style="margin: 0; color: #666; font-size: 13px;">Keep practicing and stay consistent! 🚀</p>
-              <p style="margin: 5px 0 0 0; color: #999; font-size: 12px;">Sent by BetterLeetSync</p>
+            <td style="background: linear-gradient(135deg, #f8f8f8 0%, #f0f0f0 100%); padding: 25px 30px; text-align: center; border-top: 1px solid #e5e5e5;">
+              <p style="margin: 0 0 6px 0; color: #4a4a4a; font-size: 14px; font-weight: 500;">Keep practicing and stay consistent!</p>
+              <p style="margin: 0; color: #999; font-size: 12px;">BetterLeetSync • Automated Daily Practice</p>
             </td>
           </tr>
         </table>

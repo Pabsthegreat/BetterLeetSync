@@ -406,13 +406,15 @@
       `;
 
       btn.addEventListener('mouseenter', () => {
-        btn.style.transform = 'translateY(-1px)';
-        btn.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+        btn.style.transform = 'translateY(-2px)';
+        btn.style.boxShadow = '0 4px 12px rgba(0, 184, 163, 0.5)';
+        btn.style.background = '#00d4bd';
       });
 
       btn.addEventListener('mouseleave', () => {
         btn.style.transform = 'translateY(0)';
-        btn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+        btn.style.boxShadow = '0 2px 8px rgba(0, 184, 163, 0.3)';
+        btn.style.background = '#00b8a3';
       });
 
       btn.addEventListener('click', syncSolution);
