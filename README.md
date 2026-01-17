@@ -120,6 +120,82 @@ You should see: `Server running on http://localhost:3456`
 
 ---
 
+### Part 1B: Cloud Deployment (Railway) - Optional but Recommended
+
+Instead of running the server locally, deploy to Railway for 24/7 availability. **Free tier available!**
+
+#### Why Deploy to Cloud?
+- ✅ No need to keep your computer running
+- ✅ Access from anywhere
+- ✅ More reliable syncing
+- ✅ Free tier: 500 hours/month ($5 credit)
+
+#### Step-by-Step Railway Deployment
+
+**1. Sign Up for Railway**
+   - Go to [railway.app](https://railway.app)
+   - Click **"Login with GitHub"**
+   - Authorize Railway to access your repos
+
+**2. Create New Project**
+   - Click **"New Project"**
+   - Select **"Deploy from GitHub repo"**
+   - Choose your **BetterLeetSync** repository
+   - Railway will detect it's a Node.js app
+
+**3. Add Environment Variables**
+   - After deployment starts, click on your service
+   - Go to **"Variables"** tab
+   - Click **"New Variable"** and add these **one by one**:
+
+   ```
+   Variable Name: GITHUB_TOKEN
+   Value: ghp_YOUR_TOKEN_HERE
+   
+   Variable Name: GITHUB_OWNER
+   Value: your-github-username
+   
+   Variable Name: GITHUB_REPO
+   Value: Leetcode
+   
+   Variable Name: HMAC_SECRET
+   Value: your-random-secret-string-min-32-chars
+   ```
+
+   **Important:** Do **not** set `PORT=3456` (or any fixed port) in Railway. Railway injects its own `PORT`, and overriding it can prevent the app from starting.
+
+   - Railway will automatically redeploy after adding variables (~30 seconds)
+
+**4. Get Your Public URL**
+   - Click on your service in Railway
+   - Look for the **"Settings"** tab
+   - Find **"Networking"** section
+   - Click **"Generate Domain"** if no domain exists
+   - Copy the URL (e.g., `https://betterleetsync-production.up.railway.app`)
+
+**5. Verify Deployment**
+   - Open in browser: `https://your-railway-url/health`
+   - Should see: `{"status":"ok","configured":true}`
+   - If shows `"configured":false`, check your environment variables
+
+**6. Update Extension Settings**
+   - Instead of `http://localhost:3456`
+   - Use: `https://your-railway-url` (include `https://`)
+   - Make sure HMAC Secret matches what you set in Railway
+   - Click **"Save Settings"**
+
+**That's it!** Your backend is now running 24/7 in the cloud.
+
+#### Railway Tips
+
+- **Free Tier Limits**: 500 hours/month, 1GB outbound bandwidth
+- **Your Usage**: ~10-100 requests/month (well within free tier)
+- **Monitoring**: View logs in Railway dashboard → Deployments tab
+- **Updates**: Push to GitHub → Railway auto-deploys new changes
+- **Sleeping**: Railway may sleep after inactivity, wakes up automatically on first request
+
+---
+
 ### Part 2: Chrome Extension Setup
 
 #### 1. Load Extension in Chrome
@@ -135,9 +211,12 @@ You should see: `Server running on http://localhost:3456`
 1. Click the extension icon in Chrome toolbar
 2. Click **"Options"** or right-click → **"Options"**
 3. Enter settings:
-   - **Backend URL**: `http://localhost:3456`
-   - **HMAC Secret**: The same secret from your backend `.env` file
+   - **Backend URL**: 
+     - Local: `http://localhost:3456`
+     - Railway: `https://your-railway-url` (from Part 1B)
+   - **HMAC Secret**: The same secret from backend `.env` or Railway variables
 4. Click **"Save Settings"**
+5. Click **"Test Connection"** - should show "Connected!"
 
 #### 3. Test the Extension
 
@@ -266,7 +345,8 @@ Leetcode/
 
 **404 Error:**
 - Ensure backend URL in extension settings is correct
-- Backend must be running
+- Include `https://` for Railway, `http://` for localhost
+- Backend must be running (check Railway logs or local terminal)
 
 ### Backend Issues
 
@@ -363,8 +443,9 @@ class Solution:
 **Completely Free!**
 - ✅ GitHub Actions free for public repos
 - ✅ Gmail SMTP is free
+- ✅ Railway free tier: 500 hours/month (more than enough)
 - ✅ No subscriptions or paid services required
-- ✅ Self-hosted backend (runs on your machine)
+- ✅ Optional: Self-hosted backend (runs on your machine)
 
 ---
 
