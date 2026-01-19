@@ -91,29 +91,28 @@ async function getProblemDetails(titleSlug) {
   return data.data.question;
 }
 
-// Get last accepted submission
+// Get last accepted submission using GraphQL
 async function getLastSubmission(titleSlug) {
-  const query = `
-    query getSubmissions($offset: Int!, $limit: Int!, $questionSlug: String!) {
-      submissionList(
-        offset: $offset
-        limit: $limit
-        questionSlug: $questionSlug
-      ) {
-        submissions {
-          id
-          statusDisplay
-          lang
-          timestamp
-          runtime
-          memory
+  try {
+    // Step 1: Get list of submissions to find an accepted one
+    const listQuery = `
+      query getSubmissions($offset: Int!, $limit: Int!, $questionSlug: String!) {
+        submissionList(
+          offset: $offset
+          limit: $limit
+          questionSlug: $questionSlug
+        ) {
+          submissions {
+            id
+            statusDisplay
+            lang
+            timestamp
+          }
         }
       }
-    }
-  `;
+    `;
 
-  try {
-    const response = await fetch(LEETCODE_API, {
+    const listResponse = await fetch(LEETCODE_API, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -121,37 +120,103 @@ async function getLastSubmission(titleSlug) {
       },
       credentials: 'include',
       body: JSON.stringify({
-        query,
-        variables: { titleSlug, offset: 0, limit: 20 }
+        query: listQuery,
+        variables: { questionSlug: titleSlug, offset: 0, limit: 20 }
       })
     });
 
-    const data = await response.json();
+    const listData = await listResponse.json();
     
-    if (data.errors) {
-      console.error('GraphQL errors:', data.errors);
+    if (listData.errors) {
+      console.error('GraphQL errors fetching submissions:', listData.errors);
       return null;
     }
     
-    const submissions = data.data?.submissionList?.submissions || [];
+    const submissions = listData.data?.submissionList?.submissions || [];
+    console.log(`Found ${submissions.length} submissions for ${titleSlug}`);
+    
+    // Find first accepted submission
     const accepted = submissions.find(s => s.statusDisplay === 'Accepted');
     
     if (!accepted) {
+      console.log(`No accepted submission found for ${titleSlug}`);
       return null;
     }
-    
-    const codeResponse = await fetch(`https://leetcode.com/api/submissions/${accepted.id}/`, {
-      credentials: 'include'
+
+    console.log('Accepted submission ID:', accepted.id);
+
+    // Step 2: Fetch the submission code using GraphQL
+    const detailQuery = `
+      query submissionDetails($submissionId: Int!) {
+        submissionDetails(submissionId: $submissionId) {
+          code
+          timestamp
+          lang {
+            name
+            verboseName
+          }
+        }
+      }
+    `;
+
+    const detailResponse = await fetch(LEETCODE_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Referer': `https://leetcode.com/problems/${titleSlug}/submissions/${accepted.id}/`,
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        query: detailQuery,
+        variables: { submissionId: parseInt(accepted.id) }
+      })
     });
+
+    const detailData = await detailResponse.json();
     
-    const codeData = await codeResponse.json();
+    if (detailData.errors) {
+      console.error('GraphQL errors fetching submission details:', detailData.errors);
+      return null;
+    }
+
+    const details = detailData.data?.submissionDetails;
+    if (!details || !details.code) {
+      console.log('No code found in submission details');
+      return null;
+    }
+
+    console.log(`Got code for ${titleSlug}: ${details.code.length} chars`);
     
+    // Map LeetCode language names to standard extensions
+    const langName = details.lang?.name || accepted.lang;
+    const langMap = {
+      'python': 'python',
+      'python3': 'python3',
+      'java': 'java',
+      'cpp': 'cpp',
+      'c++': 'cpp',
+      'c': 'c',
+      'javascript': 'javascript',
+      'typescript': 'typescript',
+      'go': 'golang',
+      'golang': 'golang',
+      'rust': 'rust',
+      'ruby': 'ruby',
+      'swift': 'swift',
+      'kotlin': 'kotlin',
+      'scala': 'scala',
+      'php': 'php',
+      'csharp': 'csharp',
+      'c#': 'csharp'
+    };
+    const mappedLang = langMap[langName?.toLowerCase()] || langName || 'txt';
+
     return {
       id: accepted.id,
-      statusDisplay: accepted.statusDisplay,
-      lang: codeData.lang || accepted.lang,
-      timestamp: accepted.timestamp,
-      code: codeData.code || ''
+      statusDisplay: 'Accepted',
+      lang: mappedLang,
+      timestamp: details.timestamp || Date.now(),
+      code: details.code
     };
   } catch (error) {
     console.error(`Error fetching submission for ${titleSlug}:`, error);

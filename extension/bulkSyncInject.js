@@ -227,89 +227,130 @@
     return data.data?.question;
   }
 
-  // Get last accepted submission
+  // Get last accepted submission using GraphQL
   async function getLastSubmission(titleSlug) {
     try {
-      // Use the submissions API directly
-      const response = await fetch(`https://leetcode.com/api/submissions/?offset=0&limit=20&lastkey=&question_slug=${titleSlug}`, {
-        credentials: 'include'
+      // Step 1: Get list of submissions to find an accepted one
+      const listQuery = `
+        query getSubmissions($offset: Int!, $limit: Int!, $questionSlug: String!) {
+          submissionList(
+            offset: $offset
+            limit: $limit
+            questionSlug: $questionSlug
+          ) {
+            submissions {
+              id
+              statusDisplay
+              lang
+              timestamp
+            }
+          }
+        }
+      `;
+
+      const listResponse = await fetch(LEETCODE_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Referer': `https://leetcode.com/problems/${titleSlug}/`,
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          query: listQuery,
+          variables: { questionSlug: titleSlug, offset: 0, limit: 20 }
+        })
       });
 
-      if (!response.ok) {
-        console.error(`Submissions API failed for ${titleSlug}:`, response.status);
+      const listData = await listResponse.json();
+      
+      if (listData.errors) {
+        console.error('GraphQL errors fetching submissions:', listData.errors);
         return null;
       }
-
-      const data = await response.json();
-      const submissions = data.submissions_dump || [];
       
+      const submissions = listData.data?.submissionList?.submissions || [];
       console.log(`Found ${submissions.length} submissions for ${titleSlug}`);
       
       // Find first accepted submission
-      const accepted = submissions.find(s => s.status_display === 'Accepted');
+      const accepted = submissions.find(s => s.statusDisplay === 'Accepted');
       
       if (!accepted) {
         console.log(`No accepted submission found for ${titleSlug}`);
         return null;
       }
 
-      console.log('Accepted submission:', accepted);
+      console.log('Accepted submission ID:', accepted.id);
 
-      // The submissions list doesn't include full code - need to fetch submission details
-      // The submission ID is in the 'id' field
-      if (!accepted.id) {
-        console.log('No submission ID found');
-        return null;
-      }
-
-      // Fetch the full submission details with code
-      const detailResponse = await fetch(`https://leetcode.com/submissions/detail/${accepted.id}/`, {
-        credentials: 'include',
-        headers: {
-          'Accept': 'application/json'
+      // Step 2: Fetch the submission code using GraphQL
+      const detailQuery = `
+        query submissionDetails($submissionId: Int!) {
+          submissionDetails(submissionId: $submissionId) {
+            code
+            timestamp
+            lang {
+              name
+              verboseName
+            }
+          }
         }
+      `;
+
+      const detailResponse = await fetch(LEETCODE_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Referer': `https://leetcode.com/problems/${titleSlug}/submissions/${accepted.id}/`,
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          query: detailQuery,
+          variables: { submissionId: parseInt(accepted.id) }
+        })
       });
 
-      if (!detailResponse.ok) {
-        // Try alternative: use the code from accepted if it exists
-        if (accepted.code) {
-          return { lang: accepted.lang, code: accepted.code };
-        }
-        console.error(`Submission detail fetch failed for ${accepted.id}:`, detailResponse.status);
+      const detailData = await detailResponse.json();
+      
+      if (detailData.errors) {
+        console.error('GraphQL errors fetching submission details:', detailData.errors);
         return null;
       }
 
-      // Check if response is JSON
-      const contentType = detailResponse.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const detailData = await detailResponse.json();
-        return { 
-          lang: detailData.lang || accepted.lang, 
-          code: detailData.code 
-        };
+      const details = detailData.data?.submissionDetails;
+      if (!details || !details.code) {
+        console.log('No code found in submission details');
+        return null;
       }
 
-      // If HTML returned, try to extract code from accepted object or page
-      // Some submissions include code directly
-      if (accepted.code) {
-        return { lang: accepted.lang, code: accepted.code };
-      }
+      console.log(`Got code for ${titleSlug}: ${details.code.length} chars`);
+      
+      // Map LeetCode language names to standard extensions
+      const langName = details.lang?.name || accepted.lang;
+      const langMap = {
+        'python': 'python',
+        'python3': 'python3',
+        'java': 'java',
+        'cpp': 'cpp',
+        'c++': 'cpp',
+        'c': 'c',
+        'javascript': 'javascript',
+        'typescript': 'typescript',
+        'go': 'golang',
+        'golang': 'golang',
+        'rust': 'rust',
+        'ruby': 'ruby',
+        'swift': 'swift',
+        'kotlin': 'kotlin',
+        'scala': 'scala',
+        'php': 'php',
+        'csharp': 'csharp',
+        'c#': 'csharp'
+      };
+      const mappedLang = langMap[langName?.toLowerCase()] || langName || 'txt';
 
-      // Parse HTML to extract code
-      const html = await detailResponse.text();
-      const codeMatch = html.match(/submissionCode:\s*'([^']+)'/);
-      if (codeMatch) {
-        const code = codeMatch[1]
-          .replace(/\\u[\dA-Fa-f]{4}/g, m => String.fromCharCode(parseInt(m.slice(2), 16)))
-          .replace(/\\n/g, '\n')
-          .replace(/\\t/g, '\t')
-          .replace(/\\'/g, "'")
-          .replace(/\\\\/g, '\\');
-        return { lang: accepted.lang, code };
-      }
-
-      console.log('Could not extract code from submission detail');
-      return null;
+      return { 
+        lang: mappedLang, 
+        code: details.code 
+      };
     } catch (error) {
       console.error(`Error fetching submission for ${titleSlug}:`, error);
       return null;
