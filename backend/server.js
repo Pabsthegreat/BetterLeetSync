@@ -19,7 +19,7 @@ app.use(cors());
 
 // Custom middleware to capture raw body for HMAC verification
 app.use(express.json({ 
-  limit: '5mb',
+  limit: '25mb',
   verify: (req, res, buf, encoding) => {
     req.rawBody = buf.toString(encoding || 'utf8');
   }
@@ -185,8 +185,9 @@ async function githubRequest(endpoint, method = 'GET', body = null) {
 }
 
 // Get file content from GitHub
-async function getFileContent(path) {
-  const result = await githubRequest(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`);
+async function getFileContent(path, ref = null) {
+  const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  const result = await githubRequest(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}${refQuery}`);
   if (!result) return null;
   
   return {
@@ -280,13 +281,120 @@ async function createOrUpdateFile(path, content, message) {
   return { changed: true, sha: result.content?.sha || result.sha };
 }
 
+function validateSyncPayload(data) {
+  if (!data?.slug || !data?.title || !data?.difficulty || !data?.code || !data?.language) {
+    return 'Missing required fields: slug, title, difficulty, code, language';
+  }
+
+  return null;
+}
+
+function buildSolutionArtifact(data) {
+  const {
+    slug,
+    title,
+    difficulty,
+    topics,
+    description_html,
+    code,
+    language,
+    source_url
+  } = data;
+
+  const normalizedTopics = topics || [];
+  const ext = getExtension(language);
+  const difficultyFolder = DIFFICULTY_FOLDER_MAP[difficulty] || 'unknown';
+  const solutionPath = `${difficultyFolder}/${slug}/solution.${ext}`;
+  const solutionContent = buildSolutionContent({
+    title,
+    slug,
+    difficulty,
+    topics: normalizedTopics,
+    description_html: description_html || '',
+    code,
+    source_url: source_url || ''
+  }, ext);
+
+  const today = new Date().toISOString().split('T')[0];
+  const indexItem = {
+    slug,
+    name: title,
+    difficulty,
+    topics: normalizedTopics,
+    path: solutionPath,
+    date_solved: today
+  };
+
+  return { title, solutionPath, solutionContent, indexItem };
+}
+
+async function getDefaultBranchSnapshot() {
+  const repository = await githubRequest(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}`);
+  const branch = repository.default_branch;
+  if (!branch) {
+    throw new Error('GitHub repository has no default branch');
+  }
+
+  const ref = await githubRequest(
+    `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/ref/heads/${encodeURIComponent(branch)}`
+  );
+  const commitSha = ref?.object?.sha;
+  if (!commitSha) {
+    throw new Error(`Could not resolve default branch: ${branch}`);
+  }
+
+  const commit = await githubRequest(
+    `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/commits/${commitSha}`
+  );
+  const treeSha = commit?.tree?.sha;
+  if (!treeSha) {
+    throw new Error(`Could not resolve tree for branch: ${branch}`);
+  }
+
+  return { branch, commitSha, treeSha };
+}
+
+async function createBulkCommit(files, snapshot) {
+  const tree = await githubRequest(
+    `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/trees`,
+    'POST',
+    {
+      base_tree: snapshot.treeSha,
+      tree: files.map(file => ({
+        path: file.path,
+        mode: '100644',
+        type: 'blob',
+        content: file.content
+      }))
+    }
+  );
+
+  const commit = await githubRequest(
+    `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/commits`,
+    'POST',
+    {
+      message: `Bulk sync solutions: ${files.length} problem(s)`,
+      tree: tree.sha,
+      parents: [snapshot.commitSha]
+    }
+  );
+
+  await githubRequest(
+    `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/refs/heads/${encodeURIComponent(snapshot.branch)}`,
+    'PATCH',
+    { sha: commit.sha, force: false }
+  );
+
+  return commit.sha;
+}
+
 // Sync endpoint
 app.post('/sync', verifyHMAC, async (req, res) => {
   try {
     const { slug, title, difficulty, topics, description_html, code, language, source_url, skipIndex } = req.body;
 
     // Validate required fields
-    if (!slug || !title || !difficulty || !code || !language) {
+    if (validateSyncPayload(req.body)) {
       return res.status(400).json({ 
         error: 'Missing required fields: slug, title, difficulty, code, language' 
       });
@@ -299,33 +407,7 @@ app.post('/sync', verifyHMAC, async (req, res) => {
       });
     }
 
-    const ext = getExtension(language);
-    const difficultyFolder = DIFFICULTY_FOLDER_MAP[difficulty] || 'unknown';
-    const solutionPath = `${difficultyFolder}/${slug}/solution.${ext}`;
-    
-    // Build solution file content
-    const solutionContent = buildSolutionContent({
-      title,
-      slug,
-      difficulty,
-      topics: topics || [],
-      description_html: description_html || '',
-      code,
-      source_url: source_url || ''
-    }, ext);
-
-    // Get current date for date_solved
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-
-    // Prepare new index item (for response, even if skipIndex is true)
-    const newIndexItem = {
-      slug,
-      name: title,
-      difficulty,
-      topics: topics || [],
-      path: solutionPath,
-      date_solved: today
-    };
+    const { solutionPath, solutionContent, indexItem: newIndexItem } = buildSolutionArtifact(req.body);
 
     // Check if solution content changed
     const existingSolution = await getFileContent(solutionPath);
@@ -382,6 +464,87 @@ app.post('/sync', verifyHMAC, async (req, res) => {
 
   } catch (error) {
     console.error('Sync error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk sync endpoint: write all solution files in one GitHub commit.
+app.post('/bulk-sync', verifyHMAC, async (req, res) => {
+  try {
+    const { items } = req.body;
+
+    if (!Array.isArray(items)) {
+      return res.status(400).json({
+        error: 'Missing required field: items (array)'
+      });
+    }
+
+    if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+      return res.status(500).json({
+        error: 'Server not configured: missing GitHub credentials'
+      });
+    }
+
+    const artifacts = [];
+    const paths = new Set();
+
+    for (const item of items) {
+      const validationError = validateSyncPayload(item);
+      if (validationError) {
+        return res.status(400).json({ error: validationError });
+      }
+
+      const artifact = buildSolutionArtifact(item);
+      if (paths.has(artifact.solutionPath)) {
+        return res.status(400).json({
+          error: `Duplicate solution path in bulk request: ${artifact.solutionPath}`
+        });
+      }
+
+      paths.add(artifact.solutionPath);
+      artifacts.push(artifact);
+    }
+
+    if (artifacts.length === 0) {
+      return res.json({
+        success: true,
+        no_change: true,
+        count: 0,
+        changedCount: 0,
+        indexItems: [],
+        message: 'No solutions to sync'
+      });
+    }
+
+    const snapshot = await getDefaultBranchSnapshot();
+    const changedFiles = [];
+
+    for (const artifact of artifacts) {
+      const existing = await getFileContent(artifact.solutionPath, snapshot.branch);
+      if (!existing || existing.content !== artifact.solutionContent) {
+        changedFiles.push({
+          path: artifact.solutionPath,
+          content: artifact.solutionContent
+        });
+      }
+    }
+
+    if (changedFiles.length > 0) {
+      await createBulkCommit(changedFiles, snapshot);
+    }
+
+    res.json({
+      success: true,
+      no_change: changedFiles.length === 0,
+      count: artifacts.length,
+      changedCount: changedFiles.length,
+      indexItems: artifacts.map(artifact => artifact.indexItem),
+      message: changedFiles.length === 0
+        ? 'No changes detected'
+        : `Bulk synced ${changedFiles.length} solution(s)`
+    });
+  } catch (error) {
+    console.error('Bulk sync error:', error);
     res.status(500).json({ error: error.message });
   }
 });

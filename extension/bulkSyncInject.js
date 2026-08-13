@@ -357,8 +357,8 @@
     }
   }
 
-  // Sync single problem
-  async function syncProblem(titleSlug, settings, ui, skipIndex = false) {
+  // Fetch and prepare one problem for the bulk commit.
+  async function prepareProblem(titleSlug, ui) {
     ui.addLog(`  Fetching details for ${titleSlug}...`, 'info');
     
     const details = await getProblemDetails(titleSlug);
@@ -371,7 +371,7 @@
       throw new Error('No accepted submission with code found');
     }
     
-    ui.addLog(`  Found code (${submission.code.length} chars), syncing...`, 'info');
+    ui.addLog(`  Found code (${submission.code.length} chars), staging...`, 'info');
 
     const syncData = {
       slug: details.titleSlug,
@@ -381,15 +381,24 @@
       description_html: details.content,
       code: submission.code,
       language: submission.lang,
-      source_url: `https://leetcode.com/problems/${titleSlug}/`,
-      skipIndex: skipIndex  // Skip index update during bulk sync
+      source_url: `https://leetcode.com/problems/${titleSlug}/`
     };
 
+    return {
+      title: details.title,
+      payload: syncData
+    };
+  }
+
+  // Commit all staged solution files in one GitHub commit.
+  async function syncBulk(items, settings, ui) {
+    ui.addLog(`Creating one commit for ${items.length} solution(s)...`, 'info');
+
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const body = JSON.stringify(syncData);
+    const body = JSON.stringify({ items });
     const signature = await generateSignature(settings.hmacSecret, timestamp, body);
 
-    const response = await fetch(`${settings.backendUrl}/sync`, {
+    const response = await fetch(`${settings.backendUrl}/bulk-sync`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -401,14 +410,18 @@
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Sync failed');
+      throw new Error(error.error || 'Bulk sync failed');
     }
 
     const result = await response.json();
-    return {
-      title: details.title,
-      indexItem: result.indexItem  // Return index item for batch update
-    };
+    const changedCount = Number.isInteger(result.changedCount) ? result.changedCount : items.length;
+    ui.addLog(
+      result.no_change
+        ? '✓ No solution changes detected'
+        : `✓ Created one commit with ${changedCount} solution(s)`,
+      'success'
+    );
+    return result;
   }
 
   // Batch update index with all synced items
@@ -463,6 +476,8 @@
   async function main() {
     const ui = createUI();
     const indexItems = [];  // Collect index items for batch update
+    const preparedItems = [];
+    let bulkCommitSucceeded = false;
     
     try {
       // Get settings from extension storage
@@ -514,9 +529,8 @@
         ui.updateProgress(progress, `[${i + 1}/${problems.length}] Processing ${problem.titleSlug}...`);
 
         try {
-          const result = await syncProblem(problem.titleSlug, settings, ui, true);  // skipIndex = true
-          synced++;
-          indexItems.push(result.indexItem);  // Collect for batch update
+          const result = await prepareProblem(problem.titleSlug, ui);
+          preparedItems.push(result.payload);
           ui.addLog(`✓ ${result.title}`, 'success');
         } catch (error) {
           failed++;
@@ -529,6 +543,14 @@
         }
       }
 
+      if (preparedItems.length > 0) {
+        ui.updateProgress(95, 'Creating bulk solution commit...');
+        const result = await syncBulk(preparedItems, settings, ui);
+        indexItems.push(...(result.indexItems || []));
+        synced = preparedItems.length;
+        bulkCommitSucceeded = true;
+      }
+
       ui.updateProgress(100, 'Complete!');
       ui.showSummary(synced, failed);
       ui.addLog(`\nBulk sync finished! Synced: ${synced}, Failed: ${failed}, Skipped: ${skipped}`, synced > 0 ? 'success' : 'info');
@@ -536,8 +558,8 @@
     } catch (error) {
       ui.addLog(`Error: ${error.message}`, 'error');
     } finally {
-      // ALWAYS update index with whatever was successfully synced, even if error occurred
-      if (indexItems.length > 0) {
+      // Keep the index as a separate commit, but only after the solution commit succeeds.
+      if (bulkCommitSucceeded && indexItems.length > 0) {
         try {
           const settings = await new Promise(resolve => {
             chrome.storage.sync.get({
@@ -548,6 +570,7 @@
           
           ui.updateProgress(95, 'Updating index.json...');
           await updateIndexBatch(indexItems, settings, ui);
+          ui.updateProgress(100, 'Complete!');
         } catch (error) {
           ui.addLog(`✗ Failed to update index: ${error.message}`, 'error');
         }
